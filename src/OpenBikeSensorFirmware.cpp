@@ -358,14 +358,14 @@ void loop() {
   currentSet->batteryLevel = voltageMeter->read();
   currentSet->isInsidePrivacyArea = gps.isInsidePrivacyArea();
 
+  lastMeasurements = sensorManager->m_sensors[confirmationSensorID].numberOfTriggers;
   sensorManager->reset();
-
-  int measurements = 0;
 
   // if the detected minimum was measured more than 5s ago, it is discarded and cannot be confirmed
   int timeDelta = (int) (currentTimeMillis - timeOfMinimum);
   if ((timeDelta ) > (config.confirmationTimeWindow * 1000)) {
     Serial.println(">>> CTW reached - reset() <<<");
+    // TODO: Setting to zero might cause a flicker if there is already a new value!
     minDistanceToConfirm = MAX_SENSOR_VALUE;
     datasetToConfirm = nullptr;
   }
@@ -374,7 +374,21 @@ void loop() {
   while ((currentTimeMillis - startTimeMillis) < measureInterval) {
 
     currentTimeMillis = millis();
-    sensorManager->getDistances();
+    if (sensorManager->pollDistancesParallel()) {
+      // if a new minimum on the selected sensor is detected, the value and the time of detection will be stored
+      if (sensorManager->sensorValues[confirmationSensorID] > 0
+          && sensorManager->sensorValues[confirmationSensorID] < minDistanceToConfirm) {
+        minDistanceToConfirm = sensorManager->sensorValues[confirmationSensorID];
+        minDistanceToConfirmIndex = sensorManager->getCurrentMeasureIndex();
+        // if there was no measurement of this sensor for this index, it is the
+        // one before. This happens with fast confirmations.
+        if (sensorManager->m_sensors[confirmationSensorID].echoDurationMicroseconds[minDistanceToConfirm - 1] <= 0) {
+          minDistanceToConfirmIndex--;
+        }
+        datasetToConfirm = currentSet;
+        timeOfMinimum = currentTimeMillis;
+      }
+    }
     gps.handle();
 
     displayTest->showValues(
@@ -433,21 +447,6 @@ void loop() {
       lastButtonState = buttonState;
     }
 
-    // if a new minimum on the selected sensor is detected, the value and the time of detection will be stored
-    if (sensorManager->sensorValues[confirmationSensorID] > 0
-      && sensorManager->sensorValues[confirmationSensorID] < minDistanceToConfirm) {
-      minDistanceToConfirm = sensorManager->sensorValues[confirmationSensorID];
-      minDistanceToConfirmIndex = sensorManager->getCurrentMeasureIndex();
-      // if there was no measurement of this sensor for this index, it is the
-      // one before. This happens with fast confirmations.
-      if (sensorManager->m_sensors[confirmationSensorID].echoDurationMicroseconds[minDistanceToConfirm - 1] <= 0) {
-        minDistanceToConfirmIndex--;
-      }
-      datasetToConfirm = currentSet;
-      timeOfMinimum = currentTimeMillis;
-    }
-    measurements++;
-
       // #######################################################
       // Batterievoltage
       // #######################################################
@@ -481,7 +480,7 @@ void loop() {
   Serial.write("min. distance: ");
   Serial.print(currentSet->sensorValues[confirmationSensorID]) ;
   Serial.write(" cm,");
-  Serial.print(measurements);
+  Serial.print(lastMeasurements);
   Serial.write(" measurements  \n");
 #endif
 
@@ -497,9 +496,6 @@ void loop() {
   } else {
     dataBuffer.push(currentSet);
   }
-
-
-  lastMeasurements = measurements;
 
   if (transmitConfirmedData) {
     // Empty buffer by writing it, after confirmation it will be written to SD card directly so no confirmed sets will be lost
