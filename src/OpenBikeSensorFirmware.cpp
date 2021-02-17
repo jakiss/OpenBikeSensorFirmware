@@ -58,8 +58,11 @@ BluetoothManager* bluetoothManager;
 
 Gps gps;
 
-const long BLUETOOTH_INTERVAL_MILLIS = 250;
-long lastBluetoothInterval = 0;
+static const long BLUETOOTH_INTERVAL_MILLIS = 250;
+static long lastBluetoothInterval = 0;
+
+static const long DISPLAY_INTERVAL_MILLIS = 20;
+static long lastDisplayInterval = 0;
 
 float BatteryValue = -1;
 float TemperatureValue = -1;
@@ -370,8 +373,10 @@ void loop() {
     datasetToConfirm = nullptr;
   }
 
+  int loops = 0;
   // do this for the time specified by measureInterval, e.g. 1s
   while ((currentTimeMillis - startTimeMillis) < measureInterval) {
+    loops++;
 
     currentTimeMillis = millis();
     if (sensorManager->pollDistancesParallel()) {
@@ -391,18 +396,20 @@ void loop() {
     }
     gps.handle();
 
-    displayTest->showValues(
-      sensorManager->m_sensors[LEFT_SENSOR_ID],
-      sensorManager->m_sensors[RIGHT_SENSOR_ID],
-      minDistanceToConfirm,
-      BatteryValue,
-      (int16_t) TemperatureValue,
-      lastMeasurements,
-      currentSet->isInsidePrivacyArea,
-      gps.getSpeed(),
-      gps.getValidSatellites()
-    );
-
+    if (lastDisplayInterval != (currentTimeMillis / DISPLAY_INTERVAL_MILLIS)) {
+      lastDisplayInterval = currentTimeMillis / DISPLAY_INTERVAL_MILLIS;
+      displayTest->showValues(
+        sensorManager->m_sensors[LEFT_SENSOR_ID],
+        sensorManager->m_sensors[RIGHT_SENSOR_ID],
+        minDistanceToConfirm,
+        BatteryValue,
+        (int16_t) TemperatureValue,
+        lastMeasurements,
+        currentSet->isInsidePrivacyArea,
+        gps.getSpeed(),
+        gps.getValidSatellites()
+      );
+    }
 
     if (bluetoothManager && bluetoothManager->hasConnectedClients()
         && lastBluetoothInterval != (currentTimeMillis / BLUETOOTH_INTERVAL_MILLIS)) {
@@ -462,6 +469,8 @@ void loop() {
       }
 
        if(BMP280_active == true)  TemperatureValue = bmp280.readTemperature();
+
+       delay(1);
   } // end measureInterval while
 
   // Write the minimum values of the while-loop to a set
@@ -477,11 +486,9 @@ void loop() {
     &(sensorManager->startOffsetMilliseconds), currentSet->measurements * sizeof(uint16_t));
 
 #ifdef DEVELOP
-  Serial.write("min. distance: ");
-  Serial.print(currentSet->sensorValues[confirmationSensorID]) ;
-  Serial.write(" cm,");
-  Serial.print(lastMeasurements);
-  Serial.write(" measurements  \n");
+  log_i("min. distance: %dcm, loops %d",
+        currentSet->sensorValues[confirmationSensorID],
+        loops);
 #endif
 
   // if nothing was detected, write the dataset to file, otherwise write it to the buffer for confirmation
